@@ -99,3 +99,11 @@ src/models/substitute.py
 !results/figures/*.csv
 results/figures/attacks_balanced_comparison.csv
 results/figures/defenses_summary.csv
+
+# Logs texte de main, anterieurs a cette branche
+results/logs/exploration_*.txt
+results/logs/feature_selection_*.txt
+
+# Resultats de cette branche : la regle results/logs/*.txt en tete ne vise
+# que les .txt, les .pkl sont les resultats chiffres et doivent etre suivis.
+!results/logs/*.pkl
