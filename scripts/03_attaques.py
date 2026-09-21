@@ -16,6 +16,7 @@ Les six attaques sont generees sur les deux echantillons, avec les parametres
 de la Table 2.
 """
 
+import argparse
 import sys
 import time
 from datetime import datetime
@@ -130,6 +131,20 @@ def tirer_echantillon(X, y, n_total, fraction_benin, seed, nom):
     return idx
 
 
+def projeter_l2(x_adv, x, eps):
+    """
+    Ramene la perturbation dans la boule L2 de rayon eps.
+
+    torchattacks borne en L-inf. Pour tester la lecture L2 du texte, on
+    reprojette apres coup : chaque ligne dont la perturbation depasse eps est
+    mise a l'echelle pour l'atteindre exactement.
+    """
+    delta = x_adv - x
+    normes = np.linalg.norm(delta, axis=1, keepdims=True)
+    facteur = np.minimum(1.0, eps / np.maximum(normes, 1e-12))
+    return x + delta * facteur
+
+
 def generer(nom, model, art_clf, X, y, cfg, device, batch_size):
     """Une attaque, parametres de la Table 2."""
     p = cfg.attacks[nom]
@@ -175,6 +190,9 @@ def generer(nom, model, art_clf, X, y, cfg, device, batch_size):
             X_adv[i:fin] = atk.generate(x=X[i:fin], y=None)
 
     bas, haut = cfg.clip_values
+    # Reprojection L2 si demandee, avant le bornage du domaine
+    if cfg.norme == "2" and nom in ("FGSM", "BIM", "PGD"):
+        X_adv = projeter_l2(X_adv, X, p["eps"])
     X_adv = np.clip(X_adv, bas, haut)
     delta = np.abs(X_adv - X)
     print(f"  {nom:<9} {(time.time()-t0)/60:5.1f} min | "
@@ -190,12 +208,22 @@ def main():
     print(f"Date : {datetime.now():%Y-%m-%d %H:%M:%S}")
     print("=" * 70 + "\n")
 
+    parseur = argparse.ArgumentParser()
+    parseur.add_argument("--norme", default=None, choices=["inf", "2"],
+                         help="borne de FGSM, BIM et PGD ; defaut = config")
+    parseur.add_argument("--suffixe", default="",
+                         help="ajoute au nom des X_adv, pour ne rien ecraser")
+    args = parseur.parse_args()
+
     cfg = load_config()
+    if args.norme:
+        cfg.norme = args.norme
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device : {device}\n")
+    print(f"Device : {device}")
+    print(f"Norme de FGSM, BIM, PGD : L{cfg.norme}\n")
 
     X_tr, y_tr, X_va, y_va, X_te, y_te = charger_donnees(cfg.paths["processed"])
     atk_dir = Path(cfg.paths["attacks"])
@@ -226,12 +254,14 @@ def main():
                                ("test", X_te, y_te, idx_te)):
         X_ech = np.ascontiguousarray(X[idx])
         y_ech = np.ascontiguousarray(y[idx])
-        joblib.dump(X_ech, atk_dir / f"X_{nom_ech}_clean.pkl")
-        joblib.dump(y_ech, atk_dir / f"y_{nom_ech}_clean.pkl")
+        if not (atk_dir / f"X_{nom_ech}_clean.pkl").exists():
+            joblib.dump(X_ech, atk_dir / f"X_{nom_ech}_clean.pkl")
+        if not (atk_dir / f"y_{nom_ech}_clean.pkl").exists():
+            joblib.dump(y_ech, atk_dir / f"y_{nom_ech}_clean.pkl")
 
         print(f"Attaques sur l'echantillon {nom_ech} ({len(X_ech):,} lignes) :")
         for nom in ATTAQUES:
-            chemin = atk_dir / f"X_adv_{nom_ech}_{nom.lower()}.pkl"
+            chemin = atk_dir / f"X_adv_{nom_ech}_{nom.lower()}{args.suffixe}.pkl"
             if chemin.exists():
                 print(f"  {nom:<9} deja genere")
                 continue

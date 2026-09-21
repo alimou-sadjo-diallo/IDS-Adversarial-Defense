@@ -63,7 +63,10 @@ results/figures/ensemble_vs_meilleure_defense.png
 
 # Checkpoints de main
 results/checkpoints/baseline_best.pth
-results/checkpoints/baseline_v*.pth
+results/checkpoints/baseline_v1_lr_fixe.pth
+results/checkpoints/baseline_v2_scheduler.pth
+results/checkpoints/baseline_v3_final.pth
+results/checkpoints/baseline_v4_final.pth
 
 # ---------------------------------------------------------------------------
 # Scripts et modules de main
@@ -91,3 +94,8 @@ src/models/substitute.py
 
 # Divers
 .gitignore.avant
+
+# CSV de resultats : la regle *.csv en tete visait les donnees brutes.
+!results/figures/*.csv
+results/figures/attacks_balanced_comparison.csv
+results/figures/defenses_summary.csv

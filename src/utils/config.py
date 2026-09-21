@@ -11,6 +11,7 @@ class Config:
                     "substitute", "attacks", "evaluation", "defenses"):
             setattr(self, cle, raw[cle])
         self.seed = raw["seed"]
+        self.norme = str(raw.get("norme_linf_lp", "inf"))
 
     @property
     def clip_values(self):

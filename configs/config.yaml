@@ -102,6 +102,24 @@ substitute:
   batch_size: 256
   f1_cible: 0.98
 
+# Norme utilisee pour borner FGSM, BIM et PGD.
+#
+# La Table 2 dit "L-inf norm" pour ces trois, mais le texte de la section
+# "Adversarial examples generation" dit : "The size of perturbation is ranged
+# from 0.1 to 0.3 for keeping the attributes of the original traffic samples,
+# with the mean squared error norm (p = 2) serving as the measure metric."
+#
+# Les deux se contredisent. En L-inf, eps 0.3 autorise chaque feature a bouger
+# de 30 % de son domaine, sur les 58 a la fois : notre FGSM touche 35 features
+# pour un L2 de 0.96, et quatre attaques sur six ramenent le detecteur au
+# plancher avec un TPR proche de zero. Le modele ne se trompe pas, il predit
+# une seule classe.
+#
+# En L2, eps 0.3 borne le vecteur entier, donc environ trois fois plus serre.
+# Nos deux attaques deja bornees en L2, DeepFool et C&W, sont justement celles
+# ou nous reproduisons le mieux leurs chiffres.
+norme_linf_lp: "inf"          # "inf" = Table 2, "2" = texte de la section
+
 # Table 2
 attacks:
   FGSM:

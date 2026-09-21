@@ -48,14 +48,14 @@ def charger(cfg, fichier, device):
     return model, ck
 
 
-def evaluer(model, cfg, device, labels, atk_dir):
+def evaluer(model, cfg, device, labels, atk_dir, sfx_atk=""):
     X = joblib.load(atk_dir / "X_test_clean.pkl")
     y = joblib.load(atk_dir / "y_test_clean.pkl")
     bs = cfg.evaluation["batch_size"]
 
     res = {"Clean": metriques(y, predire(model, X, device, bs), labels, "Clean")}
     for nom in ATTAQUES:
-        X_adv = joblib.load(atk_dir / f"X_adv_test_{nom.lower()}.pkl")
+        X_adv = joblib.load(atk_dir / f"X_adv_test_{nom.lower()}{sfx_atk}.pkl")
         res[nom] = metriques(y, predire(model, X_adv, device, bs), labels, nom)
         del X_adv
     return res
@@ -90,6 +90,8 @@ def main():
     parseur = argparse.ArgumentParser()
     parseur.add_argument("--suffixe", default="",
                          help="suffixe des checkpoints et des sorties")
+    parseur.add_argument("--attaques", default="",
+                         help="suffixe des X_adv, par exemple _l2")
     args = parseur.parse_args()
 
     cfg = load_config()
@@ -99,6 +101,9 @@ def main():
 
     y = joblib.load(atk_dir / "y_test_clean.pkl")
     frac = float((y == 0).mean())
+    if args.attaques:
+        print(f"Attaques : variante {args.attaques} "
+              f"(FGSM, BIM, PGD bornes en L2)\n")
     print(f"Test : {len(y):,} lignes, {int((y == 0).sum()):,} benin "
           f"({100*frac:.1f}%), plancher a {100*frac:.1f}%\n")
 
@@ -117,7 +122,7 @@ def main():
         if model is None:
             print(f"{fichier} introuvable\n")
             continue
-        res = evaluer(model, cfg, device, labels, atk_dir)
+        res = evaluer(model, cfg, device, labels, atk_dir, args.attaques)
         afficher(titre, res, info)
         tous[titre], infos[titre] = res, info
 
@@ -132,11 +137,11 @@ def main():
 
     fig_dir = Path(cfg.paths["figures"])
     fig_dir.mkdir(parents=True, exist_ok=True)
-    csv = fig_dir / f"evaluation_baselines{args.suffixe}.csv"
+    csv = fig_dir / f"evaluation_baselines{args.suffixe}{args.attaques}.csv"
     pd.DataFrame(lignes).to_csv(csv, index=False, float_format="%.6f")
     print(f"CSV : {csv}")
 
-    sortie = Path(cfg.paths["logs"]) / f"evaluation{args.suffixe}_{datetime.now():%Y%m%d_%H%M%S}.pkl"
+    sortie = Path(cfg.paths["logs"]) / f"evaluation{args.suffixe}{args.attaques}_{datetime.now():%Y%m%d_%H%M%S}.pkl"
     joblib.dump({"resultats": tous, "infos": infos,
                  "n_test": len(y), "frac_benin": frac}, sortie)
     print(f"Sauvegarde : {sortie}")
