@@ -517,6 +517,148 @@ Le baseline lui-même donne des chiffres **rigoureusement identiques** à 100 et
 150 passages — accuracy 98,42 %, F1 macro 77,68 %, meilleur passage 93 dans
 les deux cas. Il avait convergé.
 
+## D'où vient l'écart résiduel ? Trois hypothèses testées
+
+Après la reproduction complète, il reste **12,7 points d'écart moyen** avec
+leur Table 5. Trois explications possibles ont été testées. Les trois sont
+écartées.
+
+### 1. La norme des perturbations — écartée
+
+Leur Table 2 indique « L∞-norm » pour FGSM, BIM et PGD. Mais le texte de la
+section *Adversarial examples generation* dit : « The size of perturbation is
+ranged from 0.1 to 0.3 […] with the **mean squared error norm (p = 2)**
+serving as the measure metric. »
+
+Les deux se contredisent, et l'enjeu est considérable. En L∞, `eps=0.3`
+autorise chaque feature à bouger de 30 % de son domaine, **sur les 58 à la
+fois**. Notre PGD atteint ainsi un L2 de 1,2772 et ramène le détecteur au
+plancher avec un TPR de 0,051 : le modèle ne se trompe pas, il prédit une
+seule classe.
+
+En L2, la même valeur bornerait le vecteur entier — environ quatre fois plus
+serré.
+
+Les attaques ont été régénérées avec une reprojection L2 :
+
+| Attaque | L2 avant | L2 après | eps Table 2 |
+|---|---:|---:|---:|
+| FGSM | 0,9563 | 0,1681 | 0,2 |
+| BIM | 0,8658 | 0,2069 | 0,3 |
+| PGD | 1,2772 | **0,3000** | 0,3 |
+
+**L'accuracy du détecteur bouge de moins de 0,3 point.**
+
+| Attaque | L∞ | L2 | Écart |
+|---|---:|---:|---:|
+| FGSM | 47,86 % | 47,62 % | −0,24 |
+| BIM | 46,58 % | 46,59 % | +0,01 |
+| PGD | 48,20 % | 48,24 % | +0,04 |
+
+Une perturbation quatre fois plus petite produit le même effondrement. **La
+frontière de décision est si proche dans cet espace de features qu'un
+déplacement minime suffit à la franchir.** C'est cohérent avec DeepFool, qui
+cherche la perturbation minimale : son L2 de 0,0130 fait autant de dégâts que
+le PGD à 1,2772.
+
+*Script : `03_attaques.py --norme 2`, `04_evaluation.py --attaques _l2`.*
+
+### 2. Le trafic bénin perturbé — écartée
+
+Nos `X_adv` contiennent les 20 000 lignes perturbées, dont les 10 000
+bénignes. Or un attaquant perturbe **ses** flux d'attaque pour passer
+inaperçu ; il ne contrôle pas le trafic légitime de sa victime.
+
+Réévaluation en ne gardant la version attaquée que pour les lignes d'attaque :
+
+| Attaque | TPR, tout perturbé | TPR, bénin intact |
+|---|---:|---:|
+| FGSM | 0,112 | 0,112 |
+| BIM | 0,125 | 0,125 |
+| PGD | 0,051 | 0,051 |
+| JSMA | 0,016 | 0,016 |
+
+**Les TPR sont rigoureusement identiques.** Logique après coup : le TPR ne
+dépend que des lignes d'attaque, et elles sont perturbées dans les deux cas.
+Perturber le bénin ne changeait que le taux de faux positifs.
+
+L'accuracy monte de 1 à 4,6 points, mais l'écart avec le papier passe de 12,7
+à **13,9** : il s'éloigne.
+
+Ce que ça établit pour le rapport : **notre protocole n'était pas faussé sur
+ce point.** Les attaques réussissent vraiment, le détecteur ne repère que 5 à
+14 % des attaques perturbées.
+
+*Script : `14_benin_intact.py`.*
+
+### 3. La ressemblance du substitut — écartée, mais un résultat en sort
+
+Notre substitut est d'accord à **97,58 %** avec le détecteur sur données
+propres, et **78,2 %** des attaques transfèrent. Un réseau 100-100 et un
+réseau 512-256 prédisent la même classe dans 97,6 % des cas : leurs frontières
+de décision sont quasiment confondues.
+
+**Nous sommes donc presque en white box sans l'avoir voulu**, alors que le
+papier décrit le semi-white box comme le scénario réaliste.
+
+Hypothèse : si leur substitut ressemblait moins au détecteur, ses attaques
+transféreraient moins et leurs accuracies resteraient plus hautes.
+
+Cinq substituts ont été entraînés, du plus proche au plus éloigné :
+
+| Substitut | Architecture | Accord | Transfert | Accuracy détecteur |
+|---|---|---:|---:|---:|
+| papier | 100-100, graine 42 | **97,58 %** | 77,9 % | **52,52 %** |
+| petit | 30-30 | 94,44 % | 74,7 % | 43,41 % |
+| graine | 100-100, graine 7 | 93,00 % | 78,7 % | 46,27 % |
+| partiel | 100-100, 20 % du train | 90,48 % | 66,2 % | 51,65 % |
+| minuscule | 15-15 | 90,25 % | 58,9 % | 48,93 % |
+
+**Corrélation entre accord et accuracy : +0,041.** Nulle. Et le substitut le
+plus proche laisse le détecteur *le plus haut*, l'inverse de l'attendu.
+
+### Ce que la troisième expérience établit malgré tout
+
+C'est le résultat le plus intéressant de cette investigation, et il dépasse le
+cadre de cet article.
+
+**L'accuracy du détecteur varie de 43,41 % à 52,52 % selon le substitut**,
+soit 9 points. Sur FGSM seul, de **28,10 % à 47,86 %** : près de 20 points
+pour la même attaque, le même détecteur, la même perturbation. Seul change le
+modèle qui a généré l'attaque.
+
+Plus frappant encore, trois substituts de **même architecture 100-100**, ne
+différant que par la graine aléatoire ou la fraction de données
+d'entraînement, donnent 52,52 %, 46,27 % et 51,65 %.
+
+Un article qui rapporte une accuracy en semi-white box sans documenter son
+substitut rapporte donc un nombre dont l'incertitude atteint 20 points sur
+certaines attaques. **Personne ne mesure cette variabilité**, le papier
+compris — il donne l'architecture de son substitut et son F1, mais ni sa
+graine, ni son accord avec le détecteur, ni son taux de transfert.
+
+**Deux indicateurs sont proposés pour combler ce manque :**
+
+- **l'accord** entre substitut et détecteur sur données propres, soit la part
+  d'échantillons où les deux prédisent la même classe ;
+- **le taux de transfert** par attaque, soit la part des attaques réussies sur
+  le substitut qui réussissent aussi sur le détecteur.
+
+Les deux se calculent en quelques secondes et devraient accompagner toute
+évaluation en semi-white box.
+
+*Scripts : `15_transferabilite.py`, `16_substituts_varies.py`.*
+
+### Ce qui reste inexpliqué
+
+Aucune des trois hypothèses ne rend compte des 12,7 points. Ce que
+l'investigation a gagné, c'est de savoir **ce que ce n'est pas**, et d'avoir
+mesuré une source de variabilité que l'article ne mentionne pas.
+
+Deux pistes non explorées : le `gamma` de JSMA, non documenté, qui explique
+peut-être les 31 points d'écart sur cette attaque ; et les paramètres internes
+de C&W, dont nos 9 itérations ne suffisent pas à faire converger l'attaque.
+
 ## Incohérences relevées dans l'article
 
 Listées par souci de complétude, elles relativisent la fiabilité de ses
@@ -555,8 +697,12 @@ explique les sous-échantillons de 20 000 et 40 000 lignes sur un jeu de
 substitut. Un attaquant réel face à un IDS défendu entraînerait son substitut
 contre le modèle défendu. L'article a la même limite.
 
-**Le trafic bénin est perturbé lui aussi**, alors qu'un attaquant ne contrôle
-que son propre trafic.
+~~**Le trafic bénin est perturbé lui aussi.**~~ Testé et sans effet : les TPR
+sont identiques avec ou sans, voir la section sur l'écart résiduel.
+
+**Le choix du substitut n'est pas contrôlé.** Nos mesures montrent qu'il fait
+varier l'accuracy rapportée de 9 points en moyenne et de 20 sur FGSM. Une
+seule configuration est rapportée ici, comme dans le papier.
 
 **Deux hyperparamètres ne sont pas reproductibles à l'identique** : le
 `gamma` de JSMA et les paramètres internes de C&W, non documentés. Ce sont
@@ -595,7 +741,11 @@ results/
     ├── evaluation_baselines_ep150.csv
     ├── comparaison_papier.csv
     ├── defenses_completes_ep150.csv
-    └── ensemble_complet_ep150.csv
+    ├── ensemble_complet_ep150.csv
+    ├── evaluation_baselines_ep150_l2.csv   attaques bornées en L2
+    ├── benin_intact.csv                    trafic légitime non perturbé
+    ├── transferabilite.csv                 accord et taux de transfert
+    └── substituts_varies.csv               cinq substituts comparés
 ```
 
 **Aucun chiffre de ce document n'est recopié à la main.** Ils viennent tous
